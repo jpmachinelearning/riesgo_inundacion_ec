@@ -1,0 +1,13 @@
+cod_canton,nombre_canton,precipitacion,riesgo_predicho,probabilidad
+0901,Guayaquil,1100,Alto,0.88
+0906,Daule,1450,Alto,0.95
+0910,Milagro,1300,Alto,0.92
+0916,Samborondón,1250,Medio,0.75
+0919,Salitre,1500,Alto,0.98
+0914,Pedro Carbo,700,Bajo,0.15
+0904,Balzar,900,Bajo,0.40
+0911,Naranjal,1150,Medio,0.65
+0903,Balao,1000,Medio,0.55
+0907,Durán,1200,Alto,0.85
+0921,Santa Lucía,1400,Alto,0.90
+0913,Palestina,1350,Alto,0.89
