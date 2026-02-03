@@ -1,0 +1,15 @@
+/* Estilos personalizados para el mapa de riesgo de inundación 
+   Puedes agregar tu código aquí abajo 
+*/
+
+body {
+    margin: 0;
+    padding: 0;
+    font-family: Arial, sans-serif;
+}
+
+#map {
+    height: 600px;
+    width: 100%;
+    border: 1px solid #ccc;
+}
