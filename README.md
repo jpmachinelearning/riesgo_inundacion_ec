@@ -7,14 +7,14 @@ Este sistema clasifica el riesgo de inundación utilizando Machine Learning (Ran
 Utiliza datos climáticos del INAMHI y demográficos del INEC.
 
 ## Instalación en Producción
-1. `git clone https://github.com/tu_usuario/tu_repo.git`
+1. `git clone https://github.com/jpmachinelearning/riesgo_inundacion_ec.git`
 2. pip install -r requirements.txt
 3. Configurar WSGI en PythonAnywhere apuntando a app.py.
 
 ## Autores
 | Nombre y Apellido | Rol en el Proyecto |
 | :--- | :--- |
-| **Nombre Estudiante 1** | **ML & Data Cleaning** |
-| **Juan Padilla M.** | **Backend & Flask** |
-| **Nombre Estudiante 3** | **Frontend & Mapas** |
-| **Nombre Estudiante 4** | **Documentation** |
+| **ALEXANDER PLAZA J** | **ML & Data Cleaning** |
+| **JUAN PADILLA M.** | **Backend & Flask** |
+| **ANTHONY TOALOMBO A** | **Frontend & Mapas** |
+| **CINTHYA ORDOÑEZ F** | **Documentation** |
