@@ -12,9 +12,9 @@ Utiliza datos climáticos del INAMHI y demográficos del INEC.
 3. Configurar WSGI en PythonAnywhere apuntando a app.py.
 
 ## Autores
-| Nombre y Apellido | Rol en el Proyecto |
+| **Nombre y Apellido** | **Rol en el Proyecto** |
 | :--- | :--- |
-| **ALEXANDER PLAZA J** | **ML & Data Cleaning** |
-| **JUAN PADILLA M.** | **Backend & Flask** |
-| **ANTHONY TOALOMBO A** | **Frontend & Mapas** |
-| **CINTHYA ORDOÑEZ F** | **Documentation** |
+| ALEXANDER PLAZA J | ML & Data Cleaning |
+| JUAN PADILLA M. | Backend & Flask |
+| ANTHONY TOALOMBO A | Frontend & Mapas |
+| CINTHYA ORDOÑEZ F | Documentation |
