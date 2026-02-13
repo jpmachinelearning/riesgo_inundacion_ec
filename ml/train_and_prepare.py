@@ -27,6 +27,8 @@ OUTPUT_DIR = ROOT / "outputs"
 APP_DATA_DIR = ROOT / "app" / "data"
 RAW_DIR = ROOT / "data" / "raw"
 OFFICIAL_DIR = RAW_DIR / "official"
+CACHED_DATASET_PATH = OUTPUT_DIR / "dataset_guayas_oficial_completo.csv"
+CACHED_GEOJSON_PATH = APP_DATA_DIR / "parroquias_riesgo.geojson"
 
 PARROQUIAS_ARCGIS_URL = (
     "https://services7.arcgis.com/iFGeGXTAJXnjq0YN/ArcGIS/rest/services/"
@@ -44,6 +46,32 @@ CENSO_MANLOC_ZIP_PATH = OFFICIAL_DIR / "BDD_CPV2022_MANLOC_CSV.zip"
 # Official IGM terrain model for topographic features.
 IGM_DTM_WMS_URL = "https://www.geoportaligm.gob.ec/dtm/ows"
 IGM_ELEV_LAYER = "igm:elevacion50k"
+
+TOPOGRAPHY_COLS = ["altitud_igm_m", "pendiente_igm", "rango_altitud_igm_m"]
+
+OFFICIAL_BASE_COLS = [
+    "codigo",
+    "codigo_inec",
+    "provincia",
+    "canton",
+    "parroquia",
+    "superficie_km2",
+    "shape_length",
+    "latitud",
+    "longitud",
+    "anio",
+    "mes",
+    "poblacion_2022",
+    "edad_promedio_2022",
+    "pct_mujeres_2022",
+    "pct_urbana_2022",
+    "hogares_2022",
+    "viviendas_2022",
+    "densidad_poblacional_2022",
+    "personas_por_hogar_2022",
+    "viviendas_por_km2_2022",
+    "indice_compacidad",
+]
 
 
 def normalize_code(value: object) -> str:
@@ -92,6 +120,40 @@ def download_if_missing(url: str, output_path: Path) -> None:
             for chunk in response.iter_content(chunk_size=1024 * 1024):
                 if chunk:
                     f.write(chunk)
+
+
+def load_cached_columns(columns: list[str]) -> pd.DataFrame | None:
+    if not CACHED_DATASET_PATH.exists():
+        return None
+
+    cached = pd.read_csv(CACHED_DATASET_PATH, dtype={"codigo": str}, low_memory=False)
+    if "codigo" not in cached.columns:
+        return None
+    cached["codigo"] = cached["codigo"].map(normalize_code)
+
+    missing = [c for c in columns if c not in cached.columns]
+    if missing:
+        return None
+
+    out = cached[columns].copy()
+    return out.drop_duplicates(subset=["codigo"]).reset_index(drop=True)
+
+
+def load_cached_geojson() -> dict | None:
+    if not CACHED_GEOJSON_PATH.exists():
+        return None
+    try:
+        return json.loads(CACHED_GEOJSON_PATH.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def load_cached_official_base() -> tuple[pd.DataFrame, dict] | None:
+    df = load_cached_columns(OFFICIAL_BASE_COLS)
+    geojson = load_cached_geojson()
+    if df is None or geojson is None:
+        return None
+    return df, geojson
 
 
 def iter_arcgis_features(where_clause: str) -> Iterable[dict]:
@@ -269,43 +331,57 @@ def aggregate_simple_weight(zip_path: Path, member_name: str, out_col: str) -> p
 
 
 def build_official_feature_table() -> tuple[pd.DataFrame, dict]:
-    download_if_missing(CENSO_MANLOC_ZIP_URL, CENSO_MANLOC_ZIP_PATH)
+    try:
+        download_if_missing(CENSO_MANLOC_ZIP_URL, CENSO_MANLOC_ZIP_PATH)
 
-    parishes_df, geojson = fetch_official_guayas_parishes()
+        parishes_df, geojson = fetch_official_guayas_parishes()
 
-    pob_df = aggregate_pob_from_manloc(CENSO_MANLOC_ZIP_PATH)
-    hog_df = aggregate_simple_weight(CENSO_MANLOC_ZIP_PATH, "BDD_HOG_CPV2022_MANLOC.csv", "hogares_2022")
-    viv_df = aggregate_simple_weight(CENSO_MANLOC_ZIP_PATH, "BDD_VIV_CPV2022_MANLOC.csv", "viviendas_2022")
+        pob_df = aggregate_pob_from_manloc(CENSO_MANLOC_ZIP_PATH)
+        hog_df = aggregate_simple_weight(
+            CENSO_MANLOC_ZIP_PATH, "BDD_HOG_CPV2022_MANLOC.csv", "hogares_2022"
+        )
+        viv_df = aggregate_simple_weight(
+            CENSO_MANLOC_ZIP_PATH, "BDD_VIV_CPV2022_MANLOC.csv", "viviendas_2022"
+        )
 
-    df = (
-        parishes_df.merge(pob_df, on="codigo", how="left")
-        .merge(hog_df, on="codigo", how="left")
-        .merge(viv_df, on="codigo", how="left")
-        .copy()
-    )
+        df = (
+            parishes_df.merge(pob_df, on="codigo", how="left")
+            .merge(hog_df, on="codigo", how="left")
+            .merge(viv_df, on="codigo", how="left")
+            .copy()
+        )
 
-    for col in [
-        "superficie_km2",
-        "shape_length",
-        "latitud",
-        "longitud",
-        "poblacion_2022",
-        "hogares_2022",
-        "viviendas_2022",
-        "edad_promedio_2022",
-        "pct_mujeres_2022",
-        "pct_urbana_2022",
-    ]:
-        df[col] = pd.to_numeric(df[col], errors="coerce")
+        for col in [
+            "superficie_km2",
+            "shape_length",
+            "latitud",
+            "longitud",
+            "poblacion_2022",
+            "hogares_2022",
+            "viviendas_2022",
+            "edad_promedio_2022",
+            "pct_mujeres_2022",
+            "pct_urbana_2022",
+        ]:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
 
-    df["densidad_poblacional_2022"] = safe_div(df["poblacion_2022"], df["superficie_km2"])
-    df["personas_por_hogar_2022"] = safe_div(df["poblacion_2022"], df["hogares_2022"])
-    df["viviendas_por_km2_2022"] = safe_div(df["viviendas_2022"], df["superficie_km2"])
+        df["densidad_poblacional_2022"] = safe_div(df["poblacion_2022"], df["superficie_km2"])
+        df["personas_por_hogar_2022"] = safe_div(df["poblacion_2022"], df["hogares_2022"])
+        df["viviendas_por_km2_2022"] = safe_div(df["viviendas_2022"], df["superficie_km2"])
 
-    perim_km = df["shape_length"] / 1000.0
-    df["indice_compacidad"] = safe_div(4 * math.pi * df["superficie_km2"], perim_km**2)
+        perim_km = df["shape_length"] / 1000.0
+        df["indice_compacidad"] = safe_div(4 * math.pi * df["superficie_km2"], perim_km**2)
 
-    return df, geojson
+        return df, geojson
+    except Exception as exc:  # noqa: BLE001
+        cached = load_cached_official_base()
+        if cached is not None:
+            print(
+                f"[WARN] No se pudo reconstruir base oficial desde web ({exc}). "
+                f"Se usa cache local: {CACHED_DATASET_PATH}"
+            )
+            return cached
+        raise
 
 
 def build_climate_features_from_historical(path: Path) -> pd.DataFrame:
@@ -352,6 +428,18 @@ def _elev_key(lat: float, lon: float) -> tuple[float, float]:
     return (round(float(lat), 4), round(float(lon), 4))
 
 
+def igm_service_available(session: requests.Session) -> bool:
+    try:
+        resp = session.get(
+            IGM_DTM_WMS_URL,
+            params={"SERVICE": "WMS", "REQUEST": "GetCapabilities"},
+            timeout=8,
+        )
+        return resp.status_code == 200
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def query_igm_elevation(
     lat: float,
     lon: float,
@@ -378,7 +466,7 @@ def query_igm_elevation(
     last_error: Exception | None = None
     for _ in range(retries + 1):
         try:
-            resp = session.get(IGM_DTM_WMS_URL, params=params, timeout=45)
+            resp = session.get(IGM_DTM_WMS_URL, params=params, timeout=8)
             resp.raise_for_status()
             payload = resp.json()
             features = payload.get("features", [])
@@ -400,6 +488,11 @@ def build_topographic_features(df: pd.DataFrame) -> pd.DataFrame:
     cache: dict[tuple[float, float], float] = {}
     session = requests.Session()
     step = 0.01
+
+    if not igm_service_available(session):
+        for col in TOPOGRAPHY_COLS:
+            out[col] = np.nan
+        return out[["codigo"] + TOPOGRAPHY_COLS]
 
     def sample(lat: float, lon: float) -> float:
         if not np.isfinite(lat) or not np.isfinite(lon):
@@ -663,15 +756,6 @@ def main() -> None:
     climate_df = build_climate_features_from_historical(HISTORICAL_LABELS_PATH)
     labels_df, rate_threshold = build_historical_labels(HISTORICAL_LABELS_PATH)
 
-    dataset = (
-        official_df.merge(climate_df, on="codigo", how="left")
-        .merge(labels_df, on="codigo", how="left")
-        .copy()
-    )
-
-    topography_df = build_topographic_features(dataset[["codigo", "latitud", "longitud"]])
-    dataset = dataset.merge(topography_df, on="codigo", how="left")
-
     climate_cols = [
         "precipitacion_mensual_prom_mm",
         "precipitacion_mensual_p95_mm",
@@ -680,9 +764,37 @@ def main() -> None:
         "humedad_relativa_prom",
         "cerca_rio_prom",
     ]
-    topography_cols = ["altitud_igm_m", "pendiente_igm", "rango_altitud_igm_m"]
 
-    dataset = spatial_impute_columns(dataset, climate_cols + topography_cols)
+    dataset = (
+        official_df.merge(climate_df, on="codigo", how="left")
+        .merge(labels_df, on="codigo", how="left")
+        .copy()
+    )
+
+    try:
+        topography_df = build_topographic_features(dataset[["codigo", "latitud", "longitud"]])
+    except Exception as exc:  # noqa: BLE001
+        print(f"[WARN] Error consultando topografia IGM ({exc}).")
+        topography_df = dataset[["codigo"]].copy()
+        for col in TOPOGRAPHY_COLS:
+            topography_df[col] = np.nan
+
+    if topography_df[TOPOGRAPHY_COLS].isna().all().all():
+        cached_topography = load_cached_columns(["codigo"] + TOPOGRAPHY_COLS)
+        if cached_topography is not None:
+            print(
+                f"[WARN] Topografia IGM no disponible en linea. "
+                f"Se usa cache local: {CACHED_DATASET_PATH}"
+            )
+            topography_df = topography_df[["codigo"]].merge(
+                cached_topography,
+                on="codigo",
+                how="left",
+            )
+
+    dataset = dataset.merge(topography_df, on="codigo", how="left")
+
+    dataset = spatial_impute_columns(dataset, climate_cols + TOPOGRAPHY_COLS)
 
     labeled_df = dataset[dataset["target_alto_riesgo"].notna()].copy()
     unlabeled_df = dataset[dataset["target_alto_riesgo"].isna()].copy()
@@ -805,7 +917,7 @@ def main() -> None:
         },
         "variables_integradas": {
             "climaticas": climate_cols,
-            "topograficas": topography_cols,
+            "topograficas": TOPOGRAPHY_COLS,
             "socio_territoriales": [
                 "poblacion_2022",
                 "densidad_poblacional_2022",

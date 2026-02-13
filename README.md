@@ -98,6 +98,18 @@ flask --app app.app run --host=0.0.0.0 --port=5000
 URL local:
 - http://127.0.0.1:5000
 
+### 4) Ejecucion en modo produccion (sin debug)
+
+Comando recomendado para servidor WSGI:
+
+```bash
+gunicorn app.app:app --bind 0.0.0.0:${PORT:-8000}
+```
+
+Notas:
+- no se ejecuta en modo `debug`,
+- el `Procfile` del repositorio define `web: gunicorn app.app:app`.
+
 ## Modelos implementados
 
 - Regresion Logistica (base)
@@ -138,6 +150,7 @@ Archivo:
 Incluye:
 
 - limpieza y control de calidad de datos,
+- analisis exploratorio visual (EDA) con graficas de distribucion, correlacion, estacionalidad y patrones espaciales,
 - construccion de variable objetivo y variable derivada,
 - entrenamiento y optimizacion de modelos,
 - comparacion de metricas y curvas ROC,
@@ -167,3 +180,10 @@ Valida:
 - consistencia de predicciones y GeoJSON,
 - ausencia de probabilidades/riesgos faltantes en Guayas,
 - coherencia basica del notebook.
+
+## Entregables finales
+
+- URL publica de la aplicacion desplegada.
+- Repositorio GitHub con codigo Flask, `requirements.txt` y este `README.md`.
+- Video demostrativo (2-3 minutos) mostrando URL publica, hover y popup en al menos tres parroquias.
+- Captura del panel del hosting mostrando la aplicacion activa.
