@@ -1,8 +1,26 @@
 # Riesgo de Inundacion por Parroquia (Guayas)
 
-Proyecto de clasificacion supervisada + aplicacion web Flask para estimar riesgo de inundacion por parroquia usando solo datos reales oficiales.
+Proyecto de clasificacion supervisada para estimar riesgo de inundacion por parroquia, con datos reales oficiales de Ecuador e integracion en una aplicacion web Flask con visualizacion geoespacial.
 
-## 1) Estructura final del repositorio
+## Objetivo del proyecto
+
+Construir y evaluar modelos de clasificacion supervisada que asignen categoria de riesgo de inundacion por parroquia, cumpliendo:
+
+- uso exclusivo de datos reales oficiales,
+- variable objetivo construida tecnicamente (sin etiquetas predefinidas),
+- comparacion de modelos base vs optimizados,
+- exportacion de resultados para visualizacion geoespacial.
+
+## Fuentes oficiales utilizadas
+
+- INEC DPA parroquial (ArcGIS):
+  - https://services7.arcgis.com/iFGeGXTAJXnjq0YN/ArcGIS/rest/services/Parroquias_del_Ecuador/FeatureServer/0
+- INEC Censo 2022 (MANLOC CSV):
+  - https://www.ecuadorencifras.gob.ec/documentos/web-inec/bd-censo/manzana/BDD_CPV2022_MANLOC_CSV.zip
+- Base historica para construccion de etiqueta supervisada:
+  - `data/raw/dataset_proyecto.csv` (columna `inundacion`)
+
+## Estructura del repositorio
 
 ```text
 .
@@ -22,8 +40,6 @@ Proyecto de clasificacion supervisada + aplicacion web Flask para estimar riesgo
 │       ├── dataset_proyecto.csv
 │       └── official/
 │           └── .gitkeep
-├── deploy/
-│   └── pythonanywhere_wsgi.py
 ├── ml/
 │   └── train_and_prepare.py
 ├── notebooks/
@@ -44,22 +60,9 @@ Proyecto de clasificacion supervisada + aplicacion web Flask para estimar riesgo
 └── README.md
 ```
 
-## 2) Fuentes oficiales (sin sinteticos)
+## Flujo de ejecucion
 
-- INEC DPA parroquial (ArcGIS):
-  - https://services7.arcgis.com/iFGeGXTAJXnjq0YN/ArcGIS/rest/services/Parroquias_del_Ecuador/FeatureServer/0
-- INEC Censo 2022 (MANLOC CSV):
-  - https://www.ecuadorencifras.gob.ec/documentos/web-inec/bd-censo/manzana/BDD_CPV2022_MANLOC_CSV.zip
-- Historico base para etiqueta supervisada (eventos):
-  - `data/raw/dataset_proyecto.csv` (columna `inundacion`)
-
-Notas:
-- El ZIP oficial pesado no se versiona en GitHub (`.gitignore`), se descarga automaticamente cuando falta.
-- La metodologia y trazabilidad quedan en `outputs/fuentes_y_metodologia_oficial.json`.
-
-## 3) Flujo correcto del proyecto
-
-### 3.1 Crear entorno e instalar dependencias
+### 1) Instalar dependencias
 
 ```bash
 python3 -m venv .venv
@@ -67,13 +70,14 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 3.2 Entrenar y regenerar artefactos
+### 2) Entrenar y generar artefactos
 
 ```bash
 python3 ml/train_and_prepare.py
 ```
 
-Genera:
+Salidas principales:
+
 - `outputs/resumen_metricas_modelos.csv`
 - `outputs/predicciones_parroquias.csv`
 - `outputs/modelo_entrenado.joblib`
@@ -83,31 +87,16 @@ Genera:
 - `app/data/predicciones_parroquias.csv`
 - `app/data/parroquias_riesgo.geojson`
 
-### 3.3 Ejecutar app local
+### 3) Ejecutar aplicacion web local
 
 ```bash
 flask --app app.app run --host=0.0.0.0 --port=5000
 ```
 
-Abrir:
+URL local:
 - http://127.0.0.1:5000
 
-## 4) Validacion antes de subir a GitHub
-
-Ejecutar:
-
-```bash
-python3 scripts/preflight_check.py
-```
-
-Este chequeo valida:
-- no haya archivos >95 MB (riesgo de rechazo en GitHub),
-- dependencias criticas en `requirements.txt`,
-- predicciones sin faltantes de riesgo/probabilidad,
-- GeoJSON consistente para Guayas,
-- notebook JSON valido.
-
-## 5) Modelos implementados
+## Modelos implementados
 
 - Regresion Logistica (base)
 - Arbol de Decision
@@ -115,48 +104,58 @@ Este chequeo valida:
 - Arbol de Decision optimizado con `GridSearchCV`
 
 Metricas reportadas:
+
 - Precision
-- Recall (prioritaria por gestion de riesgo)
+- Recall (prioritaria en gestion de riesgo)
 - F1-score
 - ROC-AUC
 
-## 6) Notebook tecnico (Colab/Jupyter)
+## Criterio de etiqueta objetivo
+
+La etiqueta se construye por parroquia desde historial observado:
+
+- `tasa_inundacion_historica = eventos_inundacion / total_periodos`
+- umbral de alto riesgo: percentil 66 de la tasa historica
+
+Metodologia y trazabilidad:
+
+- `outputs/fuentes_y_metodologia_oficial.json`
+
+## Notebook tecnico
 
 Archivo:
+
 - `notebooks/Proyecto_Riesgo_Inundacion.ipynb`
 
-Cobertura del notebook:
-- limpieza de datos,
-- construccion de variable derivada,
-- definicion y justificacion de etiqueta objetivo,
-- entrenamiento de RL/DT/ensamble,
-- optimizacion con GridSearchCV,
-- comparacion de metricas y conclusiones.
+Incluye:
 
-## 7) Deploy en PythonAnywhere (desde GitHub)
+- limpieza y control de calidad de datos,
+- construccion de variable objetivo y variable derivada,
+- entrenamiento y optimizacion de modelos,
+- comparacion de metricas y curvas ROC,
+- verificacion de cobertura completa en Guayas,
+- conclusiones tecnicas.
 
-1. Crear web app en PythonAnywhere (Flask, Python 3.11).
-2. Clonar repositorio en `/home/<usuario>/<repo>`.
-3. Crear venv e instalar:
-   ```bash
-   mkvirtualenv --python=/usr/bin/python3.11 riesgo-inundacion
-   pip install -r /home/<usuario>/<repo>/requirements.txt
-   ```
-4. En consola, generar artefactos si hace falta:
-   ```bash
-   cd /home/<usuario>/<repo>
-   python ml/train_and_prepare.py
-   ```
-5. Editar archivo WSGI de PythonAnywhere usando `deploy/pythonanywhere_wsgi.py` como plantilla (o importando `wsgi.py` de raiz).
-6. Recargar la app en el panel de PythonAnywhere.
+## Aplicacion web: funcionalidades
 
-Si no quieres entrenar en PythonAnywhere, sube el repo ya con `app/data/predicciones_parroquias.csv` y `app/data/parroquias_riesgo.geojson` actualizados.
+- mapa interactivo con Leaflet + Esri Leaflet,
+- visualizacion de parroquias de Guayas por categoria de riesgo,
+- hover con parroquia/canton/provincia,
+- popup con riesgo y probabilidad,
+- leyenda de simbologia,
+- contexto visual fuera de Guayas en gris oscuro.
 
-## 8) Web app (funcionalidad requerida)
+## Validacion rapida del proyecto
 
-- Mapa interactivo con Leaflet + Esri Leaflet.
-- Hover: parroquia, canton, provincia.
-- Popup: riesgo y probabilidad.
-- Colores por riesgo para Guayas.
-- Parroquias fuera de Guayas en gris oscuro de contexto.
-- Leyenda e indicadores de resumen.
+Ejecutar:
+
+```bash
+python3 scripts/preflight_check.py
+```
+
+Valida:
+
+- integridad de archivos clave,
+- consistencia de predicciones y GeoJSON,
+- ausencia de probabilidades/riesgos faltantes en Guayas,
+- coherencia basica del notebook.
