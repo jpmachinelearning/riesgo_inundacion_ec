@@ -17,8 +17,10 @@ Construir y evaluar modelos de clasificacion supervisada que asignen categoria d
   - https://services7.arcgis.com/iFGeGXTAJXnjq0YN/ArcGIS/rest/services/Parroquias_del_Ecuador/FeatureServer/0
 - INEC Censo 2022 (MANLOC CSV):
   - https://www.ecuadorencifras.gob.ec/documentos/web-inec/bd-censo/manzana/BDD_CPV2022_MANLOC_CSV.zip
+- IGM (Modelo Digital del Terreno, consulta WMS para altitud):
+  - https://www.geoportaligm.gob.ec/dtm/ows
 - Base historica para construccion de etiqueta supervisada:
-  - `data/raw/dataset_proyecto.csv` (columna `inundacion`)
+  - `data/raw/dataset_proyecto.csv` (columnas `inundacion` + variables climaticas consolidadas INAMHI/SNGRE)
 
 ## Estructura del repositorio
 
@@ -109,6 +111,12 @@ Metricas reportadas:
 - Recall (prioritaria en gestion de riesgo)
 - F1-score
 - ROC-AUC
+
+## Variables integradas en el modelo
+
+- Climaticas: `precipitacion_mensual_prom_mm`, `precipitacion_mensual_p95_mm`, `precipitacion_anual_prom_mm`, `temperatura_media_prom_c`, `humedad_relativa_prom`, `cerca_rio_prom`.
+- Topograficas: `altitud_igm_m`, `pendiente_igm` (derivada), `rango_altitud_igm_m` (derivada).
+- Socio-territoriales: `poblacion_2022`, `hogares_2022`, `viviendas_2022`, `edad_promedio_2022`, `pct_mujeres_2022`, `pct_urbana_2022`, `densidad_poblacional_2022`, `personas_por_hogar_2022`, `viviendas_por_km2_2022`, `indice_compacidad`, `superficie_km2`, `shape_length`, `latitud`, `longitud`.
 
 ## Criterio de etiqueta objetivo
 

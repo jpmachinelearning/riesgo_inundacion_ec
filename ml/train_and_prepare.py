@@ -4,6 +4,7 @@ import json
 import math
 from pathlib import Path
 from typing import Iterable
+import time
 import zipfile
 
 import joblib
@@ -16,6 +17,7 @@ from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import f1_score, precision_score, recall_score, roc_auc_score
 from sklearn.model_selection import GridSearchCV, train_test_split
+from sklearn.neighbors import NearestNeighbors
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.tree import DecisionTreeClassifier
@@ -34,8 +36,14 @@ CENSO_MANLOC_ZIP_URL = (
     "https://www.ecuadorencifras.gob.ec/documentos/web-inec/bd-censo/manzana/"
     "BDD_CPV2022_MANLOC_CSV.zip"
 )
+# Historical base used by the project team, consolidated from official sources
+# (INAMHI + SNGRE) for supervised flood-event labels and climate observations.
 HISTORICAL_LABELS_PATH = RAW_DIR / "dataset_proyecto.csv"
 CENSO_MANLOC_ZIP_PATH = OFFICIAL_DIR / "BDD_CPV2022_MANLOC_CSV.zip"
+
+# Official IGM terrain model for topographic features.
+IGM_DTM_WMS_URL = "https://www.geoportaligm.gob.ec/dtm/ows"
+IGM_ELEV_LAYER = "igm:elevacion50k"
 
 
 def normalize_code(value: object) -> str:
@@ -52,6 +60,25 @@ def safe_div(num: pd.Series, den: pd.Series) -> pd.Series:
 
 def weighted_mean(sum_weighted: pd.Series, sum_weights: pd.Series) -> pd.Series:
     return safe_div(sum_weighted, sum_weights)
+
+
+def percentile_95_or_nan(series: pd.Series) -> float:
+    values = pd.to_numeric(series, errors="coerce").dropna().to_numpy()
+    if values.size == 0:
+        return float("nan")
+    return float(np.percentile(values, 95))
+
+
+def sanitize_terrain_value(value: object) -> float:
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return float("nan")
+
+    # GeoServer rasters often return very large sentinel values for NoData.
+    if (not np.isfinite(v)) or abs(v) >= 1e6 or v <= -1000:
+        return float("nan")
+    return v
 
 
 def download_if_missing(url: str, output_path: Path) -> None:
@@ -281,9 +308,208 @@ def build_official_feature_table() -> tuple[pd.DataFrame, dict]:
     return df, geojson
 
 
+def build_climate_features_from_historical(path: Path) -> pd.DataFrame:
+    hist = pd.read_csv(path)
+    hist = hist.rename(
+        columns={
+            "Codigo": "codigo",
+            "Código": "codigo",
+            "Precipitacion_Anual": "precipitacion_anual",
+            "Cerca_Rio": "cerca_rio",
+        }
+    )
+
+    if "codigo" not in hist.columns:
+        raise ValueError("No existe columna codigo/Codigo en dataset_proyecto.csv")
+
+    hist["codigo"] = hist["codigo"].map(normalize_code)
+
+    numeric_cols = [
+        "precipitacion_mm",
+        "precipitacion_anual",
+        "temp_media_c",
+        "humedad_relativa",
+        "cerca_rio",
+    ]
+    for col in numeric_cols:
+        if col in hist.columns:
+            hist[col] = pd.to_numeric(hist[col], errors="coerce")
+
+    climate = hist.groupby("codigo", as_index=False).agg(
+        precipitacion_mensual_prom_mm=("precipitacion_mm", "mean"),
+        precipitacion_mensual_p95_mm=("precipitacion_mm", percentile_95_or_nan),
+        precipitacion_anual_prom_mm=("precipitacion_anual", "mean"),
+        temperatura_media_prom_c=("temp_media_c", "mean"),
+        humedad_relativa_prom=("humedad_relativa", "mean"),
+        cerca_rio_prom=("cerca_rio", "mean"),
+        periodos_climaticos_observados=("precipitacion_mm", "count"),
+    )
+
+    return climate
+
+
+def _elev_key(lat: float, lon: float) -> tuple[float, float]:
+    return (round(float(lat), 4), round(float(lon), 4))
+
+
+def query_igm_elevation(
+    lat: float,
+    lon: float,
+    session: requests.Session,
+    delta: float = 0.01,
+    retries: int = 2,
+) -> float:
+    bbox = f"{lat - delta},{lon - delta},{lat + delta},{lon + delta}"
+    params = {
+        "SERVICE": "WMS",
+        "VERSION": "1.3.0",
+        "REQUEST": "GetFeatureInfo",
+        "LAYERS": IGM_ELEV_LAYER,
+        "QUERY_LAYERS": IGM_ELEV_LAYER,
+        "CRS": "EPSG:4326",
+        "BBOX": bbox,
+        "WIDTH": 101,
+        "HEIGHT": 101,
+        "I": 50,
+        "J": 50,
+        "INFO_FORMAT": "application/json",
+    }
+
+    last_error: Exception | None = None
+    for _ in range(retries + 1):
+        try:
+            resp = session.get(IGM_DTM_WMS_URL, params=params, timeout=45)
+            resp.raise_for_status()
+            payload = resp.json()
+            features = payload.get("features", [])
+            if not features:
+                return float("nan")
+            value = features[0].get("properties", {}).get("GRAY_INDEX")
+            return sanitize_terrain_value(value)
+        except Exception as exc:  # noqa: BLE001
+            last_error = exc
+            time.sleep(0.35)
+
+    if last_error:
+        return float("nan")
+    return float("nan")
+
+
+def build_topographic_features(df: pd.DataFrame) -> pd.DataFrame:
+    out = df[["codigo", "latitud", "longitud"]].copy()
+    cache: dict[tuple[float, float], float] = {}
+    session = requests.Session()
+    step = 0.01
+
+    def sample(lat: float, lon: float) -> float:
+        if not np.isfinite(lat) or not np.isfinite(lon):
+            return float("nan")
+        key = _elev_key(lat, lon)
+        if key in cache:
+            return cache[key]
+        value = query_igm_elevation(lat, lon, session=session)
+        cache[key] = value
+        return value
+
+    altitudes: list[float] = []
+    slopes: list[float] = []
+    ranges: list[float] = []
+
+    for row in out.itertuples(index=False):
+        lat = float(row.latitud) if pd.notna(row.latitud) else float("nan")
+        lon = float(row.longitud) if pd.notna(row.longitud) else float("nan")
+
+        c = sample(lat, lon)
+        n = sample(lat + step, lon)
+        s = sample(lat - step, lon)
+        e = sample(lat, lon + step)
+        w = sample(lat, lon - step)
+
+        altitudes.append(c)
+
+        valid_values = [v for v in [c, n, s, e, w] if np.isfinite(v)]
+        if len(valid_values) >= 2:
+            ranges.append(float(max(valid_values) - min(valid_values)))
+        else:
+            ranges.append(float("nan"))
+
+        dist_lat = step * 111_320.0
+        dist_lon = step * 111_320.0 * max(math.cos(math.radians(lat if np.isfinite(lat) else 0.0)), 0.2)
+
+        grad_ns = float("nan")
+        grad_ew = float("nan")
+
+        if np.isfinite(n) and np.isfinite(s):
+            grad_ns = abs(n - s) / (2.0 * dist_lat)
+        elif np.isfinite(c) and np.isfinite(n):
+            grad_ns = abs(n - c) / dist_lat
+        elif np.isfinite(c) and np.isfinite(s):
+            grad_ns = abs(c - s) / dist_lat
+
+        if np.isfinite(e) and np.isfinite(w):
+            grad_ew = abs(e - w) / (2.0 * dist_lon)
+        elif np.isfinite(c) and np.isfinite(e):
+            grad_ew = abs(e - c) / dist_lon
+        elif np.isfinite(c) and np.isfinite(w):
+            grad_ew = abs(c - w) / dist_lon
+
+        if np.isfinite(grad_ns) and np.isfinite(grad_ew):
+            slopes.append(float((grad_ns**2 + grad_ew**2) ** 0.5))
+        elif np.isfinite(grad_ns):
+            slopes.append(float(grad_ns))
+        elif np.isfinite(grad_ew):
+            slopes.append(float(grad_ew))
+        else:
+            slopes.append(float("nan"))
+
+    out["altitud_igm_m"] = altitudes
+    out["pendiente_igm"] = slopes
+    out["rango_altitud_igm_m"] = ranges
+
+    return out[["codigo", "altitud_igm_m", "pendiente_igm", "rango_altitud_igm_m"]]
+
+
+def spatial_impute_columns(df: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
+    out = df.copy()
+    if out.empty:
+        return out
+
+    for col in cols:
+        out[col] = pd.to_numeric(out[col], errors="coerce")
+
+        mask_known = out[col].notna() & out["latitud"].notna() & out["longitud"].notna()
+        mask_missing = out[col].isna() & out["latitud"].notna() & out["longitud"].notna()
+
+        known = out.loc[mask_known, ["latitud", "longitud", col]].copy()
+        missing = out.loc[mask_missing, ["latitud", "longitud"]].copy()
+
+        if not known.empty and not missing.empty:
+            n_neighbors = int(min(4, len(known)))
+            knn = NearestNeighbors(n_neighbors=n_neighbors)
+            knn.fit(known[["latitud", "longitud"]].to_numpy())
+            dist, idx = knn.kneighbors(missing[["latitud", "longitud"]].to_numpy())
+
+            weights = 1.0 / np.clip(dist, 1e-6, None)
+            vals = known[col].to_numpy()[idx]
+            imputed = (weights * vals).sum(axis=1) / weights.sum(axis=1)
+            out.loc[missing.index, col] = imputed
+
+        if out[col].isna().any():
+            median_val = out[col].median()
+            if pd.isna(median_val):
+                median_val = 0.0
+            out[col] = out[col].fillna(float(median_val))
+
+    return out
+
+
 def build_historical_labels(path: Path) -> tuple[pd.DataFrame, float]:
     hist = pd.read_csv(path)
-    hist["codigo"] = hist["Código"].map(normalize_code)
+    code_col = "Código" if "Código" in hist.columns else "Codigo"
+    if code_col not in hist.columns:
+        raise ValueError("No existe columna Codigo/Código para construir etiquetas historicas")
+
+    hist["codigo"] = hist[code_col].map(normalize_code)
     hist["inundacion"] = pd.to_numeric(hist["inundacion"], errors="coerce").fillna(0).astype(int)
 
     by_parish = hist.groupby("codigo", as_index=False).agg(
@@ -413,7 +639,7 @@ def export_geojson_with_predictions(base_geojson: dict, pred_df: pd.DataFrame, o
     for feat in base_geojson.get("features", []):
         props = feat.get("properties", {}).copy()
         code = str(props.get("codigo", ""))
-        pred = pred_map.get(code, None)
+        pred = pred_map.get(code)
         if pred:
             props.update(pred)
 
@@ -434,14 +660,46 @@ def main() -> None:
     APP_DATA_DIR.mkdir(parents=True, exist_ok=True)
 
     official_df, official_geojson = build_official_feature_table()
+    climate_df = build_climate_features_from_historical(HISTORICAL_LABELS_PATH)
     labels_df, rate_threshold = build_historical_labels(HISTORICAL_LABELS_PATH)
 
-    dataset = official_df.merge(labels_df, on="codigo", how="left")
+    dataset = (
+        official_df.merge(climate_df, on="codigo", how="left")
+        .merge(labels_df, on="codigo", how="left")
+        .copy()
+    )
+
+    topography_df = build_topographic_features(dataset[["codigo", "latitud", "longitud"]])
+    dataset = dataset.merge(topography_df, on="codigo", how="left")
+
+    climate_cols = [
+        "precipitacion_mensual_prom_mm",
+        "precipitacion_mensual_p95_mm",
+        "precipitacion_anual_prom_mm",
+        "temperatura_media_prom_c",
+        "humedad_relativa_prom",
+        "cerca_rio_prom",
+    ]
+    topography_cols = ["altitud_igm_m", "pendiente_igm", "rango_altitud_igm_m"]
+
+    dataset = spatial_impute_columns(dataset, climate_cols + topography_cols)
 
     labeled_df = dataset[dataset["target_alto_riesgo"].notna()].copy()
     unlabeled_df = dataset[dataset["target_alto_riesgo"].isna()].copy()
 
     feature_cols = [
+        # Climatic features (INAMHI observations consolidated in project base)
+        "precipitacion_mensual_prom_mm",
+        "precipitacion_mensual_p95_mm",
+        "precipitacion_anual_prom_mm",
+        "temperatura_media_prom_c",
+        "humedad_relativa_prom",
+        "cerca_rio_prom",
+        # Topographic features (IGM DTM)
+        "altitud_igm_m",
+        "pendiente_igm",
+        "rango_altitud_igm_m",
+        # Socio-territorial features (INEC Censo 2022 + DPA)
         "superficie_km2",
         "shape_length",
         "latitud",
@@ -542,7 +800,20 @@ def main() -> None:
         "fuentes_oficiales": {
             "INEC_DPA_Parroquias_ArcGIS": PARROQUIAS_ARCGIS_URL,
             "INEC_Censo2022_MANLOC_CSV": CENSO_MANLOC_ZIP_URL,
-            "SNGRE_historico_etiquetas_base": str(HISTORICAL_LABELS_PATH),
+            "IGM_DTM_WMS": IGM_DTM_WMS_URL,
+            "INAMHI_SNGRE_base_historica_consolidada": str(HISTORICAL_LABELS_PATH),
+        },
+        "variables_integradas": {
+            "climaticas": climate_cols,
+            "topograficas": topography_cols,
+            "socio_territoriales": [
+                "poblacion_2022",
+                "densidad_poblacional_2022",
+                "pct_urbana_2022",
+                "hogares_2022",
+                "viviendas_2022",
+                "indice_compacidad",
+            ],
         },
         "criterio_etiqueta": {
             "variable": "tasa_inundacion_historica",
