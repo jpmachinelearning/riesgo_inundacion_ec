@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Riesgo de Inundacion por Parroquia</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Manrope:wght@500;700;800&display=swap" rel="stylesheet">
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+  >
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+</head>
+<body>
+  <div class="bg-orb orb-a"></div>
+  <div class="bg-orb orb-b"></div>
+
+  <main class="layout">
+    <header class="hero card reveal">
+      <p class="kicker">Modelo supervisado · Flask + Leaflet</p>
+      <h1>Riesgo de inundacion por parroquia</h1>
+      <p class="subtitle">
+        Visualizacion geoespacial y analitica del periodo
+        <strong>{{ summary.periodo }}</strong>.
+      </p>
+
+      <section class="stats-grid">
+        <article class="stat-item">
+          <span class="label">Parroquias</span>
+          <span class="value counter" data-target="{{ summary.total_parroquias }}">0</span>
+        </article>
+        <article class="stat-item high">
+          <span class="label">Riesgo alto</span>
+          <span class="value counter" data-target="{{ summary.alto }}">0</span>
+        </article>
+        <article class="stat-item medium">
+          <span class="label">Riesgo medio</span>
+          <span class="value counter" data-target="{{ summary.medio }}">0</span>
+        </article>
+        <article class="stat-item low">
+          <span class="label">Riesgo bajo</span>
+          <span class="value counter" data-target="{{ summary.bajo }}">0</span>
+        </article>
+        <article class="stat-item neutral">
+          <span class="label">Probabilidad media</span>
+          <span class="value">{{ "%.2f"|format(summary.probabilidad_promedio) }}</span>
+        </article>
+      </section>
+    </header>
+
+    <section class="map-panel card reveal">
+      <div class="panel-top">
+        <h2>Mapa de riesgo</h2>
+        <button id="btn-reset-map" type="button">Recentrar mapa</button>
+      </div>
+      <div id="map"></div>
+    </section>
+
+    <section class="metrics card reveal">
+      <div class="panel-top">
+        <h2>Comparativa de modelos</h2>
+        <span class="pill">Recall prioritario</span>
+      </div>
+
+      {% if metrics %}
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Modelo</th>
+              <th>Precision</th>
+              <th>Recall</th>
+              <th>F1</th>
+              <th>ROC AUC</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in metrics %}
+            <tr>
+              <td>{{ row.modelo }}</td>
+              <td>{{ row.precision }}</td>
+              <td>{{ row.recall }}</td>
+              <td>{{ row.f1 }}</td>
+              <td>{{ row.roc_auc }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="empty">No hay metricas disponibles.</p>
+      {% endif %}
+    </section>
+  </main>
+
+  <script id="summary-data" type="application/json">{{ summary | tojson }}</script>
+  <script id="predictions-data" type="application/json">{{ predictions | tojson }}</script>
+  <script id="arcgis-url-data" type="application/json">{{ arcgis_parroquias_url | tojson }}</script>
+
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin=""
+  ></script>
+  <script src="https://unpkg.com/esri-leaflet@3.0.14/dist/esri-leaflet.js"></script>
+  <script src="{{ url_for('static', filename='js/map-ui.js') }}"></script>
+</body>
+</html>

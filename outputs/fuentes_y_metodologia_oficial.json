@@ -1,0 +1,19 @@
+{
+  "fuentes_oficiales": {
+    "INEC_DPA_Parroquias_ArcGIS": "https://services7.arcgis.com/iFGeGXTAJXnjq0YN/ArcGIS/rest/services/Parroquias_del_Ecuador/FeatureServer/0/query",
+    "INEC_Censo2022_MANLOC_CSV": "https://www.ecuadorencifras.gob.ec/documentos/web-inec/bd-censo/manzana/BDD_CPV2022_MANLOC_CSV.zip",
+    "SNGRE_historico_etiquetas_base": "/Users/susanito/Downloads/entregables/data/raw/dataset_proyecto.csv"
+  },
+  "criterio_etiqueta": {
+    "variable": "tasa_inundacion_historica",
+    "definicion": "eventos_inundacion/total_periodos por parroquia",
+    "umbral_alto_riesgo": 0.125,
+    "metodo_umbral": "percentil_66"
+  },
+  "resumen": {
+    "parroquias_guayas_oficiales": 54,
+    "parroquias_con_historial_para_entrenar": 40,
+    "parroquias_sin_historial_predichas": 14,
+    "modelo_ganador": "Regresion Logistica (Base)"
+  }
+}

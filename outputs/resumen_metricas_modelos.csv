@@ -1,0 +1,5 @@
+modelo,precision,recall,f1,roc_auc
+Regresion Logistica (Base),0.8,1.0,0.8889,1.0
+Ensamble RL+DT+RF,1.0,0.75,0.8571,1.0
+Arbol de Decision,1.0,0.5,0.6667,0.75
+Arbol de Decision Optimizado (GridSearchCV),1.0,0.25,0.4,0.75
